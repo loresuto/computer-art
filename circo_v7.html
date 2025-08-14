@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Circo v13 — Rotating Half-Circles + Wave Stage (Center Ripple ×3 with Reverse)</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; color: #eee; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { height: 100%; display: grid; place-items: center; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; max-width: 96vw; max-height: 96vh; display: block; background: transparent; }
+  .hud { position: fixed; left: 12px; bottom: 12px; opacity: .65; font-size: 12px; user-select: none; font-family: inherit; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="art" width="800" height="800"></canvas>
+  </div>
+  <div class="hud">Click to pause/resume. Resize window to fit.</div>
+
+  <script>
+    (function() {
+      const canvas = document.getElementById('art');
+      const ctx = canvas.getContext('2d');
+
+      let isPaused = false;
+
+      function setCanvasSize() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const maxCss = Math.min(window.innerWidth * 0.96, window.innerHeight * 0.96);
+        const cssSize = Math.max(320, Math.floor(maxCss));
+        canvas.style.width = cssSize + 'px';
+        canvas.style.height = cssSize + 'px';
+        canvas.width = Math.floor(cssSize * dpr);
+        canvas.height = Math.floor(cssSize * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      setCanvasSize();
+      window.addEventListener('resize', setCanvasSize);
+      canvas.addEventListener('click', () => { isPaused = !isPaused; });
+
+      function hash2(x, y) {
+        let h = 2166136261 >>> 0;
+        h = (h ^ x) * 16777619 >>> 0;
+        h = (h ^ y) * 16777619 >>> 0;
+        h ^= h >>> 13; h = Math.imul(h, 0x5bd1e995) >>> 0;
+        h ^= h >>> 15; return h >>> 0;
+      }
+      function rnd01(seed) { return (seed % 100000) / 100000; }
+
+      function spiralOrder(cols, rows, startDirIndex) {
+        const total = cols * rows;
+        const order = Array.from({ length: cols }, () => Array(rows).fill(-1));
+        let cx = Math.floor((cols - 1) / 2);
+        let cy = Math.floor((rows - 1) / 2);
+        const dirs = [ [1,0], [0,1], [-1,0], [0,-1] ];
+        let dir = startDirIndex % 4;
+        let steps = 1;
+        let count = 0;
+        if (cx >= 0 && cx < cols && cy >= 0 && cy < rows) {
+          order[cx][cy] = count++;
+        }
+        while (count < total) {
+          for (let r = 0; r < 2; r++) {
+            for (let s = 0; s < steps; s++) {
+              cx += dirs[dir][0];
+              cy += dirs[dir][1];
+              if (cx >= 0 && cx < cols && cy >= 0 && cy < rows && order[cx][cy] === -1) {
+                order[cx][cy] = count++;
+                if (count >= total) return order;
+              }
+            }
+            dir = (dir + 1) % 4;
+          }
+          steps++;
+        }
+        return order;
+      }
+
+      function drawHalf(th, start) {
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, th, start, start + Math.PI, false);
+        ctx.closePath();
+        ctx.fill();
+      }
+      function drawState(fgColor, two, centerX, centerY, ang, th) {
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(ang);
+        ctx.fillStyle = fgColor;
+        drawHalf(th, 0);
+        if (two) { drawHalf(th, Math.PI); }
+        ctx.restore();
+      }
+
+      function drawFrame(timeMs) {
+        if (!isPaused) {
+          render(timeMs * 0.001);
+        }
+        requestAnimationFrame(drawFrame);
+      }
+
+      function render(t) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const cols = 8, rows = 8, pad = 24;
+        const w = canvas.clientWidth || parseInt(canvas.style.width, 10) || 800;
+        const h = canvas.clientHeight || parseInt(canvas.style.height, 10) || 800;
+        const cellSize = Math.floor(Math.min((w - pad * 2) / cols, (h - pad * 2) / rows));
+        const gridW = cellSize * cols, gridH = cellSize * rows;
+        const startX = Math.floor((w - gridW) / 2);
+        const startY = Math.floor((h - gridH) / 2);
+        const radius = cellSize * 0.5;
+
+        const dominoDelay = 0.08, holdAfterD = 0.5;
+        const rippleDelay = 0.16, holdAfterR = 0.5;
+        const waveDelay   = 0.12, holdAfterW = 0.5;
+
+        const pathLen = cols * rows;
+        const maxRing = (cols - 1) + (rows - 1);
+        const periodD = pathLen * dominoDelay + holdAfterD;
+        const periodR = maxRing * rippleDelay + holdAfterR;
+        const periodW = cols * waveDelay + holdAfterW;
+
+        const stages = [
+          { type: 'domino', period: periodD },
+          { type: 'ripple', period: periodR, reverse: false },
+          { type: 'ripple', period: periodR, reverse: true },
+          { type: 'ripple', period: periodR, reverse: false },
+          { type: 'wave',   period: periodW },
+        ];
+        const stagesPerCycle = stages.length;
+        const totalPeriod = stages.reduce((a, s) => a + s.period, 0);
+        const cycleIndex = Math.floor(t / totalPeriod);
+        let tIn = t - cycleIndex * totalPeriod;
+
+        let stageIndex = 0;
+        for (let i = 0; i < stages.length; i++) {
+          if (tIn < stages[i].period) { stageIndex = i; break; }
+          tIn -= stages[i].period;
+        }
+        const stage = stages[stageIndex];
+
+        const patternCycle = cycleIndex * stagesPerCycle + stageIndex;
+
+        const orderMap = spiralOrder(cols, rows, cycleIndex % 4);
+        const cx0 = Math.floor(cols / 2), cy0 = Math.floor(rows / 2);
+
+        for (let y = 0; y < rows; y++) {
+          for (let x = 0; x < cols; x++) {
+            const tileX = startX + x * cellSize;
+            const tileY = startY + y * cellSize;
+            const cx = tileX + cellSize / 2;
+            const cy = tileY + cellSize / 2;
+
+            const seed = hash2(x * 73856093, y * 19349663);
+            const r0 = rnd01(seed);
+            const angle = (Math.floor(r0 * 4) * Math.PI) / 2;
+            const checker = ((x + y) & 1) === 0;
+
+            let tileDelay;
+            if (stage.type === 'domino') {
+              const jitter = (rnd01(seed ^ 0xABCDEF) - 0.5) * dominoDelay * 0.5;
+              tileDelay = dominoDelay * orderMap[x][y] + jitter;
+            } else if (stage.type === 'ripple') {
+              const ring = Math.abs(x - cx0) + Math.abs(y - cy0);
+              const maxRingDist = (cols - 1) + (rows - 1);
+              tileDelay = rippleDelay * (stage.reverse ? (maxRingDist - ring) : ring);
+            } else {
+              const wavePhase = (cycleIndex % 2 === 0 ? 1 : -1);
+              tileDelay = waveDelay * (x + 0.5 + wavePhase * Math.sin((y / rows + tIn * 0.2) * Math.PI * 2));
+            }
+
+            function tilePattern(cycle, tx, ty, base) {
+              const s = hash2(cycle * 1013904223 ^ (tx * 73856093), ty * 19349663);
+              const a = rnd01(s);
+              const b = rnd01(s >>> 1);
+              return { invert: (a > 0.5) ? !base : base, two: b > 0.5 };
+            }
+
+            const prev = tilePattern(patternCycle - 1, x, y, checker);
+            const next = tilePattern(patternCycle,     x, y, checker);
+
+            const transition = 0.5;
+            const progRaw = (tIn - tileDelay) / transition;
+            const progress = Math.max(0, Math.min(1, 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, Math.min(1, progRaw)))));
+
+            const prevBg = prev.invert ? '#111' : '#fff';
+            const prevFg = prev.invert ? '#fff' : '#111';
+            const nextBg = next.invert ? '#111' : '#fff';
+            const nextFg = next.invert ? '#fff' : '#111';
+
+            ctx.fillStyle = prevBg;
+            ctx.fillRect(tileX, tileY, cellSize, cellSize);
+            drawState(prevFg, prev.two, cx, cy, angle, radius + 0.5);
+
+            if (progress > 0) {
+              const revealRadius = (Math.SQRT2 * cellSize * 0.5 + 1) * Math.min(progress, 1);
+              ctx.save();
+              ctx.beginPath();
+              ctx.arc(cx, cy, revealRadius, 0, Math.PI * 2);
+              ctx.clip();
+              ctx.fillStyle = nextBg;
+              ctx.fillRect(tileX, tileY, cellSize, cellSize);
+              drawState(nextFg, next.two, cx, cy, angle, radius + 0.5);
+              ctx.restore();
+            }
+          }
+        }
+      }
+
+      requestAnimationFrame(drawFrame);
+    })();
+  </script>
+</body>
+</html>
