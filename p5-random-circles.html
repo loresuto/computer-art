@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>p5.js Random Circles</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #222;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: sans-serif;
+    }
+
+    canvas {
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
+</head>
+<body>
+  <script>
+    const MIN_DIAMETER = 40;
+    const MAX_DIAMETER = 320;
+
+    function setup() {
+      createCanvas(800, 800);
+      background(255);
+      strokeWeight(2);
+      noFill();
+    }
+
+    function draw() {
+      const useWhite = random() < 0.5;
+      stroke(useWhite ? 255 : 0);
+
+      const diameter = random(MIN_DIAMETER, MAX_DIAMETER);
+      const x = random(width);
+      const y = random(height);
+
+      circle(x, y, diameter);
+    }
+
+    function mousePressed() {
+      background(255);
+    }
+  </script>
+</body>
+</html>
